@@ -36,11 +36,11 @@
 	$timeLeft 		=	 0;
 	$avgSpeed 		=	 0;
 	$downloadCompleted = false;
-	$sizeWritten = false;
+	$sizeWritten 	= 	 false;
 	$offset 		=	 0;
 	$preAvgSpeed 	=	 0;
 	$resumeSupport 	=	 false;
-	$resuming = false;
+	$resuming 		= 	 false;
 	$type = '';
 	$file = '';
 
@@ -158,19 +158,19 @@
 		{
 			header( 'Content-Type: text/event-stream' );
 			header( 'Cache-Control: no-cache' );
+			// enable realtime output
+			header( 'X-Accel-Buffering: no' );
 			//echo "<pre>";
 			// filename containg extension of file also
 			global $type;
-			
+
 			$filename 	=	 $_GET['filename'];
 			$url 		=	 '';
 			$ext 		=	 ".".pathinfo( $filename )['extension'];
 			$type 		=	 getFileType( $ext );
 			$date 		=	 getCurrentDate();
 			$support 	= 	 $_GET['support'];
-			$allParameter = array_slice( $_GET, 4 );
-			
-			//var_dump($_GET);
+			$allParameter =  array_slice( $_GET, 4 );
 
 			foreach ( $allParameter as $key => $value ) 
 			{
@@ -186,22 +186,18 @@
 			}
 
 			$url 		=	 str_replace( ' ', '%20', $url );
-			//var_dump($url);
 			//echo "data:$url";
 			// write to database about new download added
 			include 'connection.php';
-			if( isset($_GET['resume']) && $_GET['resume'] == 'false' )
+			$isNewTask 	= 	 isset($_GET['resume']) && $_GET['resume'] == 'false';
+
+			if( $isNewTask )
 			{
 				$query = "INSERT INTO files VALUES( NULL, \"$filename\", \"$url\", 0, \"$type\", \"$ext\", \"n\",\"$support\", 0, \"$date\", \"$date\" )";
-				
+
 				if( !$db->query( $query ) )
 				{
-					echo "event: mainerror\n";
-					echo "data: Error Connecting To Server\n";
-					echo "\n";
-
-					ob_flush();
-					flush();
+					event( "mainerror", "Error Connecting To Server" );
 					$db->close();
 					exit;
 				}
@@ -209,15 +205,13 @@
 			}
 			else
 			{
-				$query = "SELECT url,avg_speed, resume FROM files WHERE filename = \"$filename\"";
-				//var_dump($query);
+				$query = "SELECT url, avg_speed, resume FROM files WHERE filename = \"$filename\"";
 				$result = $db->query( $query );
-				//var_dump($result);
 				$result = $result->fetch_assoc();
 
 				$url = $result['url'];
 				$preAvgSpeed = $result['avg_speed'];
-				$resumeSupport = ( $result['resume'] == 'y' )?true: false;
+				$resumeSupport = $result['resume'] == 'y';
 
 				$db->close();
 
@@ -226,28 +220,24 @@
 			}
 			// saving to file like "kapil.txt.doc.kink"
 			// first saving in the tmp folder
-			
 
 			$request = new HTTPRequest();
 			if( $request->open( 'GET', $url ) )
 			{
-				echo "event: mainerror\n";
-				echo "data: ".$request->getError();// no EOL at last
-				echo "\n\n";
-
-				//fclose( $file );
-
+				event( "mainerror", $request->getError() );
 				exit;
 			}
 
 			$file = '';
-			$fullFileName = "../tmp/".$filename.".$type.kink";
+			$fullFileName = "../tmp/" . $filename . ".$type.kink";
+
 			if( $_GET['resume'] == 'true' && $resumeSupport )
 			{
-				
 				$file = fopen( $fullFileName, 'ab' );
 
 				$offset = filesize($fullFileName);
+				event(null, $offset. " bytes already downloaded");
+
 				$done = $offset + 1;
 				$byte = (float)toByte($preAvgSpeed);
 				if( !($byte == 0.0) )
@@ -269,12 +259,8 @@
 
 			if( $request->saveTo( $file ) )
 			{
-				echo "event: mainerror\n";
-				echo "data: ".$request->getError();// no EOL at last
-				echo "\n\n";
-
+				event( "mainerror", $request->getError() );
 				fclose( $file );
-
 				exit;
 			}
 
@@ -282,12 +268,8 @@
 
 			if ( $request->send() )
 			{
-				echo "event: mainerror\n";
-				echo "data: ".$request->getError();// no EOL at last
-				echo "\n\n";
-
+				event( "mainerror", $request->getError() );
 				fclose( $file );
-
 				exit;
 			}
 
@@ -298,7 +280,21 @@
 	}
 
 
-	
+	function event($evt, $data)
+	{
+		if ($evt) {
+			echo "event: {$evt}\n";
+
+		}
+		if ($data) {
+			echo "data: " . $data;
+			echo "\n";
+		}
+		echo "\n";
+
+		ob_flush();
+		flush();
+	}
 
 	function progress( $channel, $downloadSize, $downloaded, $uploadSize, $uploaded )
 	{
@@ -329,36 +325,24 @@
 			$query = "UPDATE files SET filesize = $downloadSize, avg_speed = \"$avgSpeed\", last_try = \"$date\" WHERE filename=\"$filename\"";
 			if( !$db->query( $query ) )
 			{
-				echo "event: mainerror\n";
-				echo "data: Error Connecting To Server\n";
-				echo "\n";
-
-				ob_flush();
-				flush();
+				event( "mainerror", "Error Connecting To Server" );
 				$db->close();
 				exit;
 			}
 			$db->close();
 
-			echo "event: mainerror\n";
-			echo "data: ".curl_error( $channel );// no EOL at last
-			echo "\n\n";
-
+			event( "mainerror", curl_error( $channel ) );
 			fclose( $file );
-
 			exit;
 		}
+
+		$allBytesReceived = $downloadSize !== 0 && $downloaded === $downloadSize;
 
 		if( $downloaded <= 0 )
 		{
 			// still connecting
 			// send connecting event
-			echo "event: connecting\n";
-			echo "data: Connecting To Server...\n";
-			echo "\n";
-			
-			ob_flush();
-			flush();
+			event( "connecting", "Connecting To Server..." );
 		}
 		elseif( $downloadSize > 0 && $downloaded > 0 && !$downloadCompleted )
 		{
@@ -368,18 +352,19 @@
 			// send receiving event
 			if( !$sizeWritten && !$resuming )
 			{
+				$curlInfo = curl_getinfo( $channel );
+				if ( $curlInfo['http_code'] != 200 )
+				{
+					return false;
+				}
+
 				include 'connection.php';
 
 				$query = "UPDATE files SET filesize = $downloadSize WHERE filename = \"$filename\"";
-				echo "data:$query";
-				if(!$db->query($query))
+				event( null, $query );
+				if( !$db->query($query) )
 				{
-					echo "event: mainerror\n";
-					echo "data: Error Connecting To Server\n";
-					echo "\n";
-
-					ob_flush();
-					flush();
+					event( "mainerror", "Error Connecting To Server" );
 					$db->close();
 					exit;
 				}
@@ -389,43 +374,35 @@
 
 			$newTime = microtime(true);
 
-			if( $newTime - $oldTime >= $interval || ( $downloadSize !== 0 && ( $downloaded === $downloadSize ) ) )
+			if( $newTime - $oldTime >= $interval || $allBytesReceived )
 			{
+				// calculate progress & speed
+
 				if( !$downloadCompleted )
 				{
 					$speed 			=	 ( $downloaded - $dataDownload ) / ( $newTime - $oldTime );
 				}
 				
-				
 				if( $speed == 0.0 )
 				{
-					if( $downloadSize !== 0 && ( $downloaded === $downloadSize ) )
-					{
-						$timeLeft = timeTo( 0 );
-					}
-					else
-					{
-						$timeLeft = "Infinity";
-					}
+					$timeLeft		=	 $allBytesReceived ? timeTo( 0 ) : "Infinity";
 				}
 				else
 				{
 					$timeLeft 		=	 ( $downloadSize - $downloaded ) / $speed;
 					$timeLeft 		=	 timeTo( $timeLeft );
 				}
-				
-				
+
 				$speed 			=	 byteTo( $speed, 3 ).'ps';
-				
-				
+
 				$avgSpeed 		=	 ($downloaded + $offset) / ( $newTime - $startAt );
 				$avgSpeed 		=	 byteTo( $avgSpeed, 3 ).'ps';
-				
+
 				$dataDownload 	=	 $downloaded;
 				$oldTime 		=	 $newTime;
 
-				$percent		= 	 sprintf( '%.4f', ($downloaded + $offset)/ ($downloadSize+$offset) );
-				
+				$percent		= 	 sprintf( '%.4f', ($downloaded+$offset)/ ($downloadSize+$offset) );
+
 				$downloadedWithUnit 	= 	 byteTo( $downloaded+$offset, 2 );
 				$downloadSizeWithUnit 	=	 byteTo( $downloadSize+$offset, 2 );
 				
@@ -445,7 +422,7 @@
 			}
 
 		}
-		if( $downloadSize !== 0 && ( $downloaded === $downloadSize ) )
+		if( $sizeWritten && $allBytesReceived )
 		{
 			if( $downloadCompleted )
 			{
@@ -459,14 +436,11 @@
 			include 'connection.php';
 			$downloadSize += $offset;
 			$query = "UPDATE files SET filesize = $downloadSize, avg_speed = \"$avgSpeed\", complete = \"y\", last_try = \"$date\" WHERE filename = \"$filename\"";
+
+			event( null, $query );
 			if( !$db->query( $query ) )
 			{
-				echo "event: mainerror\n";
-				echo "data: Error Connecting To Server\n";
-				echo "\n";
-
-				ob_flush();
-				flush();
+				event( "mainerror", "Error Connecting To Server" );
 				$db->close();
 				exit;
 			}
@@ -504,27 +478,22 @@
 		{
 			$newFile = "../Downloads/Application/$filename";
 		}
-
+		else
+		{
+			$newFile = "../Downloads/$filename";
+		}
 
 		// copying file
-		echo "event: copying\n";
-		echo "data: Copying File To Destination Folder...\n\n";
-		ob_flush();
-		flush();
+		event( "copying", "Copying File To Destination Folder..." );
 
-		if( !( copy( $tmpFile, $newFile ) && unlink( $tmpFile ) ) )
+		if( !rename( $tmpFile, $newFile ) )
 		{
-			echo "event: mainerror\n";
-			echo "data: Cannot Move Downloaded File To Destination Folder\n\n";
-
-			ob_flush();
-			flush();
+			event( "mainerror", "Cannot Move Downloaded File To Destination Folder" );
+			exit;
 		}
 
 		// finished everything
-		echo "event: complete\n";
-		echo "data: Download Complete For $filename !!\n";
-		echo "\n";
+		event( "complete", "Download Complete For $filename !!" );
 		exit;
 	}
 

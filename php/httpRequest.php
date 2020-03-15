@@ -51,13 +51,13 @@
 		function __construct()
 		{
 			$this->channel_ 		= 	curl_init();
-			$this->requestUrl_ 		=
-			$this->requestMethod_ 	=
-			$this->responseBody_ 	=
-			$this->error_ 			=
-			$this->responseHeaders_ =
-			$this->requestHeaders_ 	=
-			$this->defaultOutputFile_ =
+			$this->requestUrl_ 		=	'';
+			$this->requestMethod_ 	=	'';
+			$this->responseBody_ 	=	'';
+			$this->error_ 			=	'';
+			$this->responseHeaders_	=	[];
+			$this->requestHeaders_ 	=	[];
+			$this->defaultOutputFile_ =	'';
 			$this->fileExtension_	=	'';
 			$this->outputToFile_	= 	false;
 			$this->timeout_ 		=	18000;
@@ -148,18 +148,38 @@
 				$this->responseHeaders_['Last-Modified']	=	$infoOfTransfer['filetime'];
  			}
  			else
- 			{
- 				$headers = $this->responseBody_;
+			{
+				$curlInfo = curl_getinfo( $this->channel_ );
 
- 				if( curl_getinfo( $this->channel_ )['redirect_count'] > 0 )
- 				{
- 					$headers = substr( $headers, strrpos( $headers, "HTTP" ) ); 
- 				}
+				if( $curlInfo['http_code'] == 301 || $curlInfo['http_code'] == 302 )
+				{
+						$headers = get_headers( $this->requestUrl_ );
+						if ($headers === false)
+						{
+								$totalHeaders = 0;
+								$curlInfo['http_code'] = 500;
+						}
+						else
+						{
+								$totalHeaders = count( $headers );
+								$curlInfo['http_code'] = 200;
+						}
+				}
+				else
+				{
+					$headers = $this->responseBody_;
 
- 				$headers = explode("\r\n", $headers );
- 				$totalHeaders = count( $headers );
- 				$this->responseHeaders_['Response-Code']	=	curl_getinfo( $this->channel_ )['http_code'];
- 				for( $i = 0; $i < $totalHeaders - 2 /* last two empty lines*/; $i++ )
+					if( $curlInfo['redirect_count'] > 0 )
+					{
+						$headers = substr( $headers, strrpos( $headers, "HTTP/" ) );
+					}
+
+					$headers = explode("\r\n", $headers );
+					$totalHeaders = count( $headers ) - 2; /* last two empty lines */
+				}
+
+				$this->responseHeaders_['Response-Code']	= $curlInfo['http_code'];
+				for( $i = 0; $i < $totalHeaders; $i++ )
  				{
  					$parts = explode( ": ", $headers[$i] );
  					if( $i === 0 )
@@ -193,11 +213,11 @@
 			//}
 
 			$this->requestMethod_ 	= $method;
-			$this->requestUrl_ 		= $url;
+			$this->requestUrl_		= $url;
 
 			// set the request url
 			curl_setopt( $this->channel_, CURLOPT_URL, $this->requestUrl_ );
-						
+
 			// setting up the request method
 			switch ( $this->requestMethod_ ) 
 			{
@@ -210,7 +230,8 @@
 				case 'head':	curl_setopt( $this->channel_, CURLOPT_NOBODY, true );
 								// to get all response headers
 								curl_setopt( $this->channel_, CURLOPT_HEADER, true );
-								break;	
+								curl_setopt( $this->channel_, CURLOPT_FOLLOWLOCATION, false );
+								break;
 			}
 
 			// only when url contains the extension
